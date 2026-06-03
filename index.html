@@ -6,7 +6,6 @@
     <title>厦门理工学院·校园全景漫游 | Web VR Tour</title>
     <meta name="description" content="基于 A-Frame 的 Web 端 360° 全景漫游系统，支持 6 个校园场景的自由切换与热点导航。">
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://unpkg.com/aframe-extras@7.5.0/dist/aframe-extras.min.js"></script>
     <style>
         :root {
             --primary: #00d4ff;
@@ -430,6 +429,112 @@
     </a-scene>
 
     <script>
+        /* ========================================================================
+         * flow-arrow 组件：自定义 GLSL shader，让箭头内部出现向前流动的光影
+         *   - 贴地 plane 默认指向 -Z（向前），流光沿 vUv.y 方向滚动
+         *   - 渐变带 + 边缘高光 叠加在原 PNG 颜色上
+         * ======================================================================== */
+        AFRAME.registerComponent('flow-arrow', {
+            schema: {
+                src:   { type: 'string',  default: 'assets/hotspot/forward.png' },
+                speed: { type: 'number',  default: 0.55 },
+                width: { type: 'number',  default: 0.5 }   // 流光条宽度
+            },
+            init: function () {
+                const el    = this.el;
+                const data  = this.data;
+                const self  = this;
+                this.elapsed = 0;
+                this._material = null;
+
+                const loader = new THREE.TextureLoader();
+                loader.load(
+                    data.src,
+                    function (texture) {
+                        texture.colorSpace = THREE.SRGBColorSpace;
+                        texture.minFilter  = THREE.LinearFilter;
+                        texture.magFilter  = THREE.LinearFilter;
+                        texture.wrapS = THREE.ClampToEdgeWrapping;
+                        texture.wrapT = THREE.ClampToEdgeWrapping;
+
+                        const material = new THREE.ShaderMaterial({
+                            uniforms: {
+                                uTime:  { value: 0 },
+                                uMap:   { value: texture },
+                                uSpeed: { value: data.speed },
+                                uBand:  { value: data.width }
+                            },
+                            vertexShader: [
+                                'varying vec2 vUv;',
+                                'void main() {',
+                                '  vUv = uv;',
+                                '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+                                '}'
+                            ].join('\n'),
+                            fragmentShader: [
+                                'uniform float uTime;',
+                                'uniform sampler2D uMap;',
+                                'uniform float uSpeed;',
+                                'uniform float uBand;',
+                                'varying vec2 vUv;',
+                                'void main() {',
+                                '  vec4 tex = texture2D(uMap, vUv);',
+                                '  if (tex.a < 0.04) discard;',
+                                // vUv.y 在默认 plane 几何里 = 0 在底边、= 1 在顶边
+                                // 经过 rotation="-90 0 0" 后箭头 tip 朝 -Z，正好对应 vUv.y=1
+                                '  float pos = mod(vUv.y - uTime * uSpeed, 1.0);',
+                                // 主流光条（沿 vUv.y 平移）
+                                '  float band = smoothstep(uBand, 0.0, abs(pos - 0.5)) * 1.0;',
+                                // 头部更亮的脉冲
+                                '  float head = smoothstep(0.10, 0.0, abs(pos - 0.5)) * 1.5;',
+                                '  float highlight = clamp(band + head, 0.0, 1.6);',
+                                '  vec3 flowColor = vec3(0.95, 1.00, 1.00);',
+                                '  vec3 finalColor = mix(tex.rgb, flowColor, clamp(highlight, 0.0, 1.0));',
+                                // 整图轻微加亮，让箭头在暗景中仍清晰
+                                '  finalColor = mix(finalColor, flowColor, 0.15);',
+                                '  gl_FragColor = vec4(finalColor, tex.a);',
+                                '}'
+                            ].join('\n'),
+                            transparent: true,
+                            side:        THREE.DoubleSide,
+                            depthWrite:  false,
+                            depthTest:   true
+                        });
+
+                        // plane 几何通常延迟到下一帧才创建到 mesh 上，需要轮询挂载
+                        const tryAttach = () => {
+                            const mesh = el.getObject3D('mesh');
+                            if (mesh) {
+                                mesh.material = material;
+                                // 显式标记需要重绘
+                                if (mesh.material) mesh.material.needsUpdate = true;
+                                self._material = material;
+                            } else {
+                                setTimeout(tryAttach, 60);
+                            }
+                        };
+                        tryAttach();
+                    },
+                    undefined,
+                    function (err) {
+                        console.error('[flow-arrow] 加载贴图失败：', err);
+                    }
+                );
+            },
+            tick: function (time, deltaTime) {
+                if (this._material && this._material.uniforms) {
+                    this.elapsed += (deltaTime || 16) / 1000;
+                    this._material.uniforms.uTime.value = this.elapsed;
+                }
+            },
+            remove: function () {
+                if (this._material) {
+                    if (this._material.uniforms.uMap.value) this._material.uniforms.uMap.value.dispose();
+                    this._material.dispose();
+                }
+            }
+        });
+
         const scenes = [
             { id: 1, name: '博学苑',   desc: '知识的殿堂',       image: 'assets/博学苑1.jpg',
               hotspots: [{ target: 2, position: '2.2 0 -2.5', label: '→ 医务室' }, { target: 3, position: '-2.2 0 -2.5', label: '→ 逸夫楼' }] },
@@ -452,6 +557,7 @@
         let autoRotateId = null;
         let mouseX = 0, mouseY = 0;
         let isTransitioning = false;
+        let hoveredHotspot = null;   // 当前 hover 的 a-plane（用于让浮层标签跟随鼠标）
 
         const $ = (id) => document.getElementById(id);
         const hotspotLabel = $('hotspot-label');
@@ -472,6 +578,11 @@
 
             document.addEventListener('mousemove', (e) => {
                 mouseX = e.clientX; mouseY = e.clientY;
+                // 让浮层标签实时跟随鼠标
+                if (hoveredHotspot) {
+                    hotspotLabel.style.left = mouseX + 'px';
+                    hotspotLabel.style.top  = mouseY + 'px';
+                }
             });
 
             const sceneEl = document.querySelector('a-scene');
@@ -552,78 +663,59 @@
         }
 
         function createHotspot(hotspot) {
-            // 1) 外层容器：始终面向相机
-            const el = document.createElement('a-entity');
-            el.setAttribute('position', hotspot.position);
-            el.setAttribute('class', 'hotspot clickable');
-            el.setAttribute('data-target', hotspot.target);
-            el.setAttribute('data-label', hotspot.label);
-            el.setAttribute('look-at', '[camera]');
+            /* ------------------------------------------------------------------
+             * 设计要点：
+             *   1. 平面贴地：rotation="-90 0 0" 让 a-plane 平躺在 XZ 平面上
+             *      默认 plane 顶边(vUv.y=1)旋转后指向世界 -Z（前方）
+             *   2. 箭头自身就是几何体，click 事件直接挂在本实体上，
+             *      这样 a-frame 的 raycaster 才能命中
+             *   3. 流光效果由 flow-arrow 组件用 GLSL shader 实现，
+             *      沿 vUv.y 方向滚动，无需任何外置环/底盘
+             *   4. 鼠标悬停时显示 HTML 浮层标签（彻底告别 <a-text> 字体问题）
+             * ------------------------------------------------------------------ */
+            const plane = document.createElement('a-plane');
 
-            // 2) 外层柔光盘（淡青色，最大最先扩散）
-            const glow = document.createElement('a-entity');
-            glow.setAttribute('geometry', 'primitive: ring; radiusInner: 0.85; radiusOuter: 0.95');
-            glow.setAttribute('material', 'color: #00d4ff; transparent: true; opacity: 0.5; side: double; shader: flat; depthWrite: false');
-            glow.setAttribute('look-at', '[camera]');
-            glow.setAttribute('animation__scale', 'property: scale; from: 0.6 0.6 0.6; to: 2.2 2.2 2.2; dur: 2400; loop: true; easing: easeOutQuad');
-            glow.setAttribute('animation__fade',  'property: material.opacity; from: 0.6; to: 0; dur: 2400; loop: true; easing: easeOutQuad');
-            el.appendChild(glow);
+            // 从 hotspot.position 解析 xyz 取出前两位
+            // 默认位置形如 "2.2 0 -2.5" —— y=0 已经在地面，箭头不需要上下浮动
+            const posParts = (hotspot.position || '0 0 -2.5').split(/\s+/).map(Number);
+            const x = posParts[0] || 0;
+            const z = posParts[2] || -2.5;
+            // 让箭头稍微抬起一点点，避开和地面贴图 z-fighting
+            plane.setAttribute('position', `${x} 0.02 ${z}`);
+            // 贴地：plane 默认立在 XY 平面，绕 X 转 -90° 后平躺在 XZ
+            plane.setAttribute('rotation', '-90 0 0');
+            // 箭头面朝 -Z（前方），由 forward.png 的 tip 朝上 → 经 -90° 旋转后 tip 朝 -Z
+            plane.setAttribute('width',  '1.4');
+            plane.setAttribute('height', '1.4');
 
-            // 3) 扩散环 1（青色，错峰 0ms）
-            const ring1 = document.createElement('a-entity');
-            ring1.setAttribute('geometry', 'primitive: ring; radiusInner: 0.55; radiusOuter: 0.62');
-            ring1.setAttribute('material', 'color: #00d4ff; transparent: true; opacity: 0.9; side: double; shader: flat; depthWrite: false');
-            ring1.setAttribute('look-at', '[camera]');
-            ring1.setAttribute('animation__scale', 'property: scale; from: 0.5 0.5 0.5; to: 1.8 1.8 1.8; dur: 2000; loop: true; easing: easeOutQuad');
-            ring1.setAttribute('animation__fade',  'property: material.opacity; from: 0.9; to: 0; dur: 2000; loop: true; easing: easeOutQuad');
-            el.appendChild(ring1);
+            // 关键：class 包含 .clickable 才能被 raycaster="objects: .clickable" 命中
+            plane.setAttribute('class', 'hotspot clickable');
+            plane.setAttribute('data-target', hotspot.target);
+            plane.setAttribute('data-label',  hotspot.label);
 
-            // 4) 扩散环 2（绿色，错峰 1000ms）
-            const ring2 = document.createElement('a-entity');
-            ring2.setAttribute('geometry', 'primitive: ring; radiusInner: 0.5; radiusOuter: 0.56');
-            ring2.setAttribute('material', 'color: #7cffd4; transparent: true; opacity: 0.85; side: double; shader: flat; depthWrite: false');
-            ring2.setAttribute('look-at', '[camera]');
-            ring2.setAttribute('animation__scale', 'property: scale; from: 0.5 0.5 0.5; to: 1.8 1.8 1.8; dur: 2000; loop: true; easing: easeOutQuad; delay: 1000');
-            ring2.setAttribute('animation__fade',  'property: material.opacity; from: 0.9; to: 0; dur: 2000; loop: true; easing: easeOutQuad; delay: 1000');
-            el.appendChild(ring2);
+            // 自定义流光 shader：箭头内部出现由 tip 流向 base 的光带
+            plane.setAttribute(
+                'flow-arrow',
+                `src: assets/hotspot/forward.png; speed: 0.55; width: 0.35`
+            );
 
-            // 5) 中心箭头：呼吸缩放 + 上下浮动
-            const arrow = document.createElement('a-image');
-            arrow.setAttribute('src', '#hotspot-img');
-            arrow.setAttribute('width', '0.95');
-            arrow.setAttribute('height', '0.95');
-            arrow.setAttribute('material', 'transparent: true; side: double; alphaTest: 0.01; depthWrite: false');
-            arrow.setAttribute('look-at', '[camera]');
-            arrow.setAttribute('animation__scale', 'property: scale; from: 0.9 0.9 0.9; to: 1.15 1.15 1.15; dur: 1400; dir: alternate; loop: true; easing: easeInOutQuad');
-            arrow.setAttribute('animation__bob',   'property: position; from: 0 0 0; to: 0 0.12 0; dur: 1400; dir: alternate; loop: true; easing: easeInOutQuad');
-            el.appendChild(arrow);
-
-            // 6) 文字标签（悬浮在热点上方）
-            const targetName = scenes.find(s => s.id === hotspot.target)?.name || '';
-            const label = document.createElement('a-entity');
-            label.setAttribute('position', '0 0.85 0');
-            label.setAttribute('look-at', '[camera]');
-            label.setAttribute('animation__bob', 'property: position; from: 0 0.85 0; to: 0 0.97 0; dur: 1400; dir: alternate; loop: true; easing: easeInOutQuad');
-            label.innerHTML = `
-                <a-plane width="1.7" height="0.4"
-                         material="color: #001428; transparent: true; opacity: 0.85; side: double; shader: flat"></a-plane>
-                <a-text value="${targetName}" align="center" color="#00d4ff"
-                        position="0 0 0.01" width="2.4"></a-text>
-            `;
-            el.appendChild(label);
-
-            el.addEventListener('raycaster-intersected', () => {
+            // 事件：直接挂到带几何体的实体上（A-Frame raycaster 才能命中）
+            plane.addEventListener('click', () => {
+                if (!isTransitioning) loadScene(hotspot.target, true);
+            });
+            plane.addEventListener('mouseenter', () => {
+                hoveredHotspot = plane;
                 hotspotLabel.textContent = hotspot.label;
                 hotspotLabel.style.display = 'block';
                 hotspotLabel.style.left = mouseX + 'px';
-                hotspotLabel.style.top = mouseY + 'px';
+                hotspotLabel.style.top  = mouseY + 'px';
             });
-            el.addEventListener('raycaster-intersected-cleared', () => {
+            plane.addEventListener('mouseleave', () => {
+                hoveredHotspot = null;
                 hotspotLabel.style.display = 'none';
             });
-            el.addEventListener('click', () => loadScene(hotspot.target, true));
 
-            hotspotsContainer.appendChild(el);
+            hotspotsContainer.appendChild(plane);
         }
 
         // ===== 多功能按钮事件 =====
