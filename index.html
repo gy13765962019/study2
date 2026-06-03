@@ -402,12 +402,13 @@
         device-orientation-permission-ui="enabled: false"
     >
         <a-assets timeout="30000">
-            <img id="img-1" src="assets/博学苑1.jpg" crossorigin="anonymous">
-            <img id="img-2" src="assets/医务室2.jpg" crossorigin="anonymous">
-            <img id="img-3" src="assets/逸夫楼3.jpg" crossorigin="anonymous">
-            <img id="img-4" src="assets/校门4.jpg" crossorigin="anonymous">
-            <img id="img-5" src="assets/花园5.jpg" crossorigin="anonymous">
-            <img id="img-6" src="assets/明理楼6.jpg" crossorigin="anonymous">
+            <img id="img-1" src="assets/博学苑1.jpg">
+            <img id="img-2" src="assets/医务室2.jpg">
+            <img id="img-3" src="assets/逸夫楼3.jpg">
+            <img id="img-4" src="assets/校门4.jpg">
+            <img id="img-5" src="assets/花园5.jpg">
+            <img id="img-6" src="assets/明理楼6.jpg">
+            <img id="hotspot-img" src="assets/hotspot/forward.svg">
         </a-assets>
 
         <a-sky id="sky" src="#img-4" rotation="0 -90 0"></a-sky>
@@ -550,29 +551,77 @@
         }
 
         function createHotspot(hotspot) {
-            const el = document.createElement('a-image');
-            const svg = encodeURIComponent(`
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-                    <defs>
-                        <radialGradient id="g" cx="50%" cy="50%" r="50%">
-                            <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.9"/>
-                            <stop offset="60%" stop-color="#00d4ff" stop-opacity="0.4"/>
-                            <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
-                        </radialGradient>
-                    </defs>
-                    <circle cx="60" cy="60" r="55" fill="url(#g)"/>
-                    <circle cx="60" cy="60" r="30" fill="none" stroke="#00d4ff" stroke-width="2" opacity="0.8"/>
-                    <circle cx="60" cy="60" r="14" fill="#00d4ff"/>
-                    <circle cx="60" cy="60" r="6" fill="#fff"/>
-                </svg>
-            `);
-            el.setAttribute('src', 'data:image/svg+xml,' + svg);
+            const el = document.createElement('a-entity');
             el.setAttribute('position', hotspot.position);
-            el.setAttribute('width', '1.2');
-            el.setAttribute('height', '1.2');
             el.setAttribute('class', 'hotspot clickable');
             el.setAttribute('data-target', hotspot.target);
             el.setAttribute('data-label', hotspot.label);
+            el.setAttribute('look-at', '[camera]');
+
+            // 1) 中心箭头：呼吸缩放（前进指向标）
+            const arrow = document.createElement('a-image');
+            arrow.setAttribute('src', '#hotspot-img');
+            arrow.setAttribute('width', '0.9');
+            arrow.setAttribute('height', '0.9');
+            arrow.setAttribute('transparent', 'true');
+            arrow.setAttribute('side', 'double');
+            arrow.innerHTML = `
+                <a-animation attribute="scale"
+                             dur="1400" direction="alternate"
+                             from="0.9 0.9 0.9" to="1.15 1.15 1.15"
+                             repeat="indefinite" easing="ease-in-out"></a-animation>
+            `;
+            el.appendChild(arrow);
+
+            // 2) 扩散光环 1（青色）
+            const ring = document.createElement('a-entity');
+            ring.setAttribute('geometry', 'primitive: ring; radiusInner: 0.55; radiusOuter: 0.62');
+            ring.setAttribute('material', 'color: #00d4ff; transparent: true; opacity: 0.8; side: double; shader: flat');
+            ring.setAttribute('look-at', '[camera]');
+            ring.innerHTML = `
+                <a-animation attribute="scale"
+                             dur="1800" direction="alternate"
+                             from="0.5 0.5 0.5" to="1.8 1.8 1.8"
+                             repeat="indefinite" easing="ease-out"></a-animation>
+                <a-animation attribute="material.opacity"
+                             dur="1800" direction="alternate"
+                             from="0.9" to="0"
+                             repeat="indefinite" easing="ease-out"></a-animation>
+            `;
+            el.appendChild(ring);
+
+            // 3) 扩散光环 2（绿色，错峰）
+            const ring2 = document.createElement('a-entity');
+            ring2.setAttribute('geometry', 'primitive: ring; radiusInner: 0.65; radiusOuter: 0.7');
+            ring2.setAttribute('material', 'color: #7cffd4; transparent: true; opacity: 0.7; side: double; shader: flat');
+            ring2.setAttribute('look-at', '[camera]');
+            ring2.innerHTML = `
+                <a-animation attribute="scale"
+                             dur="1800" direction="alternate"
+                             from="0.5 0.5 0.5" to="1.8 1.8 1.8"
+                             begin="600"
+                             repeat="indefinite" easing="ease-out"></a-animation>
+                <a-animation attribute="material.opacity"
+                             dur="1800" direction="alternate"
+                             from="0.8" to="0"
+                             begin="600"
+                             repeat="indefinite" easing="ease-out"></a-animation>
+            `;
+            el.appendChild(ring2);
+
+            // 4) 文字标签（悬浮在热点上方）
+            const targetName = scenes.find(s => s.id === hotspot.target)?.name || '';
+            const label = document.createElement('a-entity');
+            label.setAttribute('position', '0 0.85 0');
+            label.setAttribute('look-at', '[camera]');
+            label.innerHTML = `
+                <a-plane width="1.6" height="0.36" color="#001428" opacity="0.78"
+                         material="transparent: true; opacity: 0.78; shader: flat; side: double"></a-plane>
+                <a-text value="${targetName}" align="center" color="#00d4ff"
+                        position="0 0 0.01" width="2.2"
+                        font="mozillavr"></a-text>
+            `;
+            el.appendChild(label);
 
             el.addEventListener('raycaster-intersected', () => {
                 hotspotLabel.textContent = hotspot.label;
