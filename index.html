@@ -6,6 +6,7 @@
     <title>厦门理工学院·校园全景漫游 | Web VR Tour</title>
     <meta name="description" content="基于 A-Frame 的 Web 端 360° 全景漫游系统，支持 6 个校园场景的自由切换与热点导航。">
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-extras@7.5.0/dist/aframe-extras.min.js"></script>
     <style>
         :root {
             --primary: #00d4ff;
@@ -408,7 +409,7 @@
             <img id="img-4" src="assets/校门4.jpg">
             <img id="img-5" src="assets/花园5.jpg">
             <img id="img-6" src="assets/明理楼6.jpg">
-            <img id="hotspot-img" src="assets/hotspot/forward.svg">
+            <img id="hotspot-img" src="assets/hotspot/forward.png">
         </a-assets>
 
         <a-sky id="sky" src="#img-4" rotation="0 -90 0"></a-sky>
@@ -551,6 +552,7 @@
         }
 
         function createHotspot(hotspot) {
+            // 1) 外层容器：始终面向相机
             const el = document.createElement('a-entity');
             el.setAttribute('position', hotspot.position);
             el.setAttribute('class', 'hotspot clickable');
@@ -558,68 +560,55 @@
             el.setAttribute('data-label', hotspot.label);
             el.setAttribute('look-at', '[camera]');
 
-            // 1) 中心箭头：呼吸缩放（前进指向标）
-            const arrow = document.createElement('a-image');
-            arrow.setAttribute('src', '#hotspot-img');
-            arrow.setAttribute('width', '0.9');
-            arrow.setAttribute('height', '0.9');
-            arrow.setAttribute('transparent', 'true');
-            arrow.setAttribute('side', 'double');
-            arrow.innerHTML = `
-                <a-animation attribute="scale"
-                             dur="1400" direction="alternate"
-                             from="0.9 0.9 0.9" to="1.15 1.15 1.15"
-                             repeat="indefinite" easing="ease-in-out"></a-animation>
-            `;
-            el.appendChild(arrow);
+            // 2) 外层柔光盘（淡青色，最大最先扩散）
+            const glow = document.createElement('a-entity');
+            glow.setAttribute('geometry', 'primitive: ring; radiusInner: 0.85; radiusOuter: 0.95');
+            glow.setAttribute('material', 'color: #00d4ff; transparent: true; opacity: 0.5; side: double; shader: flat; depthWrite: false');
+            glow.setAttribute('look-at', '[camera]');
+            glow.setAttribute('animation__scale', 'property: scale; from: 0.6 0.6 0.6; to: 2.2 2.2 2.2; dur: 2400; loop: true; easing: easeOutQuad');
+            glow.setAttribute('animation__fade',  'property: material.opacity; from: 0.6; to: 0; dur: 2400; loop: true; easing: easeOutQuad');
+            el.appendChild(glow);
 
-            // 2) 扩散光环 1（青色）
-            const ring = document.createElement('a-entity');
-            ring.setAttribute('geometry', 'primitive: ring; radiusInner: 0.55; radiusOuter: 0.62');
-            ring.setAttribute('material', 'color: #00d4ff; transparent: true; opacity: 0.8; side: double; shader: flat');
-            ring.setAttribute('look-at', '[camera]');
-            ring.innerHTML = `
-                <a-animation attribute="scale"
-                             dur="1800" direction="alternate"
-                             from="0.5 0.5 0.5" to="1.8 1.8 1.8"
-                             repeat="indefinite" easing="ease-out"></a-animation>
-                <a-animation attribute="material.opacity"
-                             dur="1800" direction="alternate"
-                             from="0.9" to="0"
-                             repeat="indefinite" easing="ease-out"></a-animation>
-            `;
-            el.appendChild(ring);
+            // 3) 扩散环 1（青色，错峰 0ms）
+            const ring1 = document.createElement('a-entity');
+            ring1.setAttribute('geometry', 'primitive: ring; radiusInner: 0.55; radiusOuter: 0.62');
+            ring1.setAttribute('material', 'color: #00d4ff; transparent: true; opacity: 0.9; side: double; shader: flat; depthWrite: false');
+            ring1.setAttribute('look-at', '[camera]');
+            ring1.setAttribute('animation__scale', 'property: scale; from: 0.5 0.5 0.5; to: 1.8 1.8 1.8; dur: 2000; loop: true; easing: easeOutQuad');
+            ring1.setAttribute('animation__fade',  'property: material.opacity; from: 0.9; to: 0; dur: 2000; loop: true; easing: easeOutQuad');
+            el.appendChild(ring1);
 
-            // 3) 扩散光环 2（绿色，错峰）
+            // 4) 扩散环 2（绿色，错峰 1000ms）
             const ring2 = document.createElement('a-entity');
-            ring2.setAttribute('geometry', 'primitive: ring; radiusInner: 0.65; radiusOuter: 0.7');
-            ring2.setAttribute('material', 'color: #7cffd4; transparent: true; opacity: 0.7; side: double; shader: flat');
+            ring2.setAttribute('geometry', 'primitive: ring; radiusInner: 0.5; radiusOuter: 0.56');
+            ring2.setAttribute('material', 'color: #7cffd4; transparent: true; opacity: 0.85; side: double; shader: flat; depthWrite: false');
             ring2.setAttribute('look-at', '[camera]');
-            ring2.innerHTML = `
-                <a-animation attribute="scale"
-                             dur="1800" direction="alternate"
-                             from="0.5 0.5 0.5" to="1.8 1.8 1.8"
-                             begin="600"
-                             repeat="indefinite" easing="ease-out"></a-animation>
-                <a-animation attribute="material.opacity"
-                             dur="1800" direction="alternate"
-                             from="0.8" to="0"
-                             begin="600"
-                             repeat="indefinite" easing="ease-out"></a-animation>
-            `;
+            ring2.setAttribute('animation__scale', 'property: scale; from: 0.5 0.5 0.5; to: 1.8 1.8 1.8; dur: 2000; loop: true; easing: easeOutQuad; delay: 1000');
+            ring2.setAttribute('animation__fade',  'property: material.opacity; from: 0.9; to: 0; dur: 2000; loop: true; easing: easeOutQuad; delay: 1000');
             el.appendChild(ring2);
 
-            // 4) 文字标签（悬浮在热点上方）
+            // 5) 中心箭头：呼吸缩放 + 上下浮动
+            const arrow = document.createElement('a-image');
+            arrow.setAttribute('src', '#hotspot-img');
+            arrow.setAttribute('width', '0.95');
+            arrow.setAttribute('height', '0.95');
+            arrow.setAttribute('material', 'transparent: true; side: double; alphaTest: 0.01; depthWrite: false');
+            arrow.setAttribute('look-at', '[camera]');
+            arrow.setAttribute('animation__scale', 'property: scale; from: 0.9 0.9 0.9; to: 1.15 1.15 1.15; dur: 1400; dir: alternate; loop: true; easing: easeInOutQuad');
+            arrow.setAttribute('animation__bob',   'property: position; from: 0 0 0; to: 0 0.12 0; dur: 1400; dir: alternate; loop: true; easing: easeInOutQuad');
+            el.appendChild(arrow);
+
+            // 6) 文字标签（悬浮在热点上方）
             const targetName = scenes.find(s => s.id === hotspot.target)?.name || '';
             const label = document.createElement('a-entity');
             label.setAttribute('position', '0 0.85 0');
             label.setAttribute('look-at', '[camera]');
+            label.setAttribute('animation__bob', 'property: position; from: 0 0.85 0; to: 0 0.97 0; dur: 1400; dir: alternate; loop: true; easing: easeInOutQuad');
             label.innerHTML = `
-                <a-plane width="1.6" height="0.36" color="#001428" opacity="0.78"
-                         material="transparent: true; opacity: 0.78; shader: flat; side: double"></a-plane>
+                <a-plane width="1.7" height="0.4"
+                         material="color: #001428; transparent: true; opacity: 0.85; side: double; shader: flat"></a-plane>
                 <a-text value="${targetName}" align="center" color="#00d4ff"
-                        position="0 0 0.01" width="2.2"
-                        font="mozillavr"></a-text>
+                        position="0 0 0.01" width="2.4"></a-text>
             `;
             el.appendChild(label);
 
