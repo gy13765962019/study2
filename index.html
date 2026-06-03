@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>厦门理工学院·校园全景漫游 | Web VR Tour</title>
+    <meta name="description" content="基于 A-Frame 的 Web 端 360° 全景漫游系统，支持 6 个校园场景的自由切换与热点导航。">
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <style>
+        :root {
+            --primary: #00d4ff;
+            --accent: #7cffd4;
+            --glass: rgba(8, 14, 28, 0.55);
+            --glass-strong: rgba(8, 14, 28, 0.82);
+            --text: #f0f6ff;
+            --text-dim: rgba(240, 246, 255, 0.65);
+            --border: rgba(0, 212, 255, 0.28);
+            --radius: 14px;
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+            --ease: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
+            color: var(--text);
+            background: #000;
+            user-select: none;
+        }
+
+        /* ===== 加载层 ===== */
+        #loader {
+            position: fixed; inset: 0;
+            background: radial-gradient(ellipse at center, #1a2540 0%, #050810 100%);
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 9999;
+            transition: opacity 0.6s ease;
+        }
+        #loader.hide { opacity: 0; pointer-events: none; }
+        #loader h1 {
+            font-size: 1.8rem; font-weight: 300; letter-spacing: 6px;
+            background: linear-gradient(120deg, #00d4ff, #7cffd4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+        #loader .sub { color: var(--text-dim); font-size: 0.8rem; letter-spacing: 3px; margin-bottom: 36px; }
+        .spinner {
+            width: 48px; height: 48px;
+            border: 2px solid rgba(0, 212, 255, 0.15);
+            border-top-color: var(--primary);
+            border-right-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .progress {
+            margin-top: 20px;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            letter-spacing: 1.5px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== 顶部栏 ===== */
+        #topbar {
+            position: fixed; top: 20px; left: 20px; right: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 16px; z-index: 50; pointer-events: none;
+        }
+        .panel {
+            background: var(--glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            pointer-events: auto;
+        }
+        #brand {
+            padding: 10px 18px;
+            display: flex; align-items: center; gap: 12px;
+        }
+        #brand .logo {
+            width: 34px; height: 34px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #00d4ff, #0066ff);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 1rem; color: #001428;
+        }
+        #brand .info .t { font-size: 0.92rem; font-weight: 500; letter-spacing: 1px; }
+        #brand .info .s { font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.5px; }
+
+        #scene-info {
+            padding: 10px 24px;
+            text-align: center;
+            min-width: 220px;
+        }
+        #scene-info .name {
+            font-size: 1.05rem; font-weight: 500;
+            color: var(--primary); letter-spacing: 2px;
+            transition: opacity 0.3s var(--ease);
+        }
+        #scene-info .desc {
+            font-size: 0.72rem; color: var(--text-dim);
+            margin-top: 2px; letter-spacing: 1px;
+        }
+
+        /* ===== 多功能按钮组（hover 滑动展开） ===== */
+        .fab-group {
+            position: fixed;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 60;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+        }
+        .fab-group .spacer { width: 48px; height: 1px; }
+        .fab {
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background: var(--glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            color: var(--text);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            font-size: 1.15rem;
+            box-shadow: var(--shadow);
+            transition: all 0.35s var(--ease);
+            position: relative;
+        }
+        .fab:hover {
+            background: var(--primary);
+            color: #001428;
+            transform: scale(1.08);
+            border-color: var(--primary);
+        }
+        .fab .tooltip {
+            position: absolute;
+            right: 60px;
+            top: 50%;
+            transform: translateY(-50%) translateX(8px);
+            background: var(--glass-strong);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: all 0.3s var(--ease);
+        }
+        .fab:hover .tooltip {
+            opacity: 1;
+            transform: translateY(-50%) translateX(0);
+        }
+        /* 隐藏的子按钮：默认藏在主按钮右侧外 */
+        .fab-sub {
+            opacity: 0;
+            transform: translateX(80px) scale(0.6);
+            pointer-events: none;
+            transition: all 0.4s var(--ease);
+        }
+        /* 当 hover 在 fab-group 上时，子按钮依次滑出 */
+        .fab-group:hover .fab-sub,
+        .fab-group.pinned .fab-sub {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+            pointer-events: auto;
+        }
+        .fab-group:hover .fab-sub:nth-child(2) { transition-delay: 0.04s; }
+        .fab-group:hover .fab-sub:nth-child(3) { transition-delay: 0.08s; }
+        .fab-group:hover .fab-sub:nth-child(4) { transition-delay: 0.12s; }
+        .fab-group:hover .fab-sub:nth-child(5) { transition-delay: 0.16s; }
+        .fab-group:hover .fab-sub:nth-child(6) { transition-delay: 0.20s; }
+        .fab-group:hover .fab-sub:nth-child(7) { transition-delay: 0.24s; }
+        /* 主按钮：hover 时旋转动画 */
+        .fab-main {
+            background: linear-gradient(135deg, #00d4ff, #0066ff);
+            color: #001428;
+            font-weight: 600;
+        }
+        .fab-group:hover .fab-main,
+        .fab-group.pinned .fab-main {
+            transform: rotate(90deg);
+            background: linear-gradient(135deg, #ff6b6b, #ff3366);
+        }
+        .fab-main.active {
+            background: linear-gradient(135deg, #ff6b6b, #ff3366);
+        }
+
+        /* ===== 场景切换滑动遮罩 ===== */
+        #slide-mask {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: linear-gradient(135deg, #00d4ff 0%, #0066ff 100%);
+            z-index: 999;
+            pointer-events: none;
+            transform: translateX(100%);
+            transition: transform 0.7s var(--ease);
+        }
+        #slide-mask.slide-in {
+            transform: translateX(0);
+        }
+        #slide-mask .scene-num {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 6rem;
+            font-weight: 200;
+            letter-spacing: 8px;
+            opacity: 0.4;
+        }
+
+        /* ===== 底部场景缩略图导航 ===== */
+        #scenes-bar {
+            position: fixed;
+            bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            padding: 10px 14px;
+            z-index: 50;
+            max-width: 92vw;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        #scenes-bar::-webkit-scrollbar { display: none; }
+        .scene-card {
+            flex-shrink: 0;
+            width: 120px;
+            background: var(--glass);
+            border: 1.5px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.35s var(--ease);
+        }
+        .scene-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--primary);
+            box-shadow: 0 8px 24px rgba(0, 212, 255, 0.3);
+        }
+        .scene-card.active {
+            border-color: var(--primary);
+            background: var(--glass-strong);
+            box-shadow: 0 0 0 2px var(--primary), 0 8px 24px rgba(0, 212, 255, 0.4);
+        }
+        .scene-card .thumb {
+            width: 100%;
+            height: 60px;
+            object-fit: cover;
+            display: block;
+        }
+        .scene-card .label {
+            text-align: center;
+            font-size: 0.75rem;
+            padding: 6px 0;
+            color: var(--text);
+            letter-spacing: 1px;
+        }
+        .scene-card.active .label { color: var(--primary); font-weight: 500; }
+        .scene-card .num {
+            position: absolute;
+            top: 4px; left: 6px;
+            font-size: 0.65rem;
+            color: var(--primary);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 1px 6px;
+            border-radius: 8px;
+        }
+        .scene-card { position: relative; }
+
+        /* ===== 操作提示（5秒后自动消失） ===== */
+        #tip {
+            position: fixed;
+            bottom: 110px; left: 50%;
+            transform: translateX(-50%);
+            background: var(--glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            letter-spacing: 1px;
+            z-index: 40;
+            transition: opacity 0.6s var(--ease);
+        }
+        #tip.hide { opacity: 0; pointer-events: none; }
+
+        /* ===== 热点标签（鼠标跟随） ===== */
+        #hotspot-label {
+            position: fixed;
+            background: var(--glass-strong);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            border: 1px solid var(--primary);
+            pointer-events: none;
+            z-index: 200;
+            display: none;
+            white-space: nowrap;
+            transform: translate(-50%, -120%);
+            letter-spacing: 1px;
+        }
+        #hotspot-label::after {
+            content: '';
+            position: absolute;
+            top: 100%; left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: var(--primary);
+        }
+
+        /* 隐藏 A-Frame 默认 VR 按钮 */
+        .a-enter-vr-button { display: none !important; }
+
+        /* 场景指示点动画 */
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <div id="loader">
+        <h1>校园全景漫游</h1>
+        <div class="sub">WEB VR · CAMPUS TOUR</div>
+        <div class="spinner"></div>
+        <div class="progress" id="progress">加载中…</div>
+    </div>
+
+    <div id="slide-mask"><div class="scene-num" id="mask-num">01</div></div>
+
+    <div id="topbar">
+        <div id="brand" class="panel">
+            <div class="logo">XMUT</div>
+            <div class="info">
+                <div class="t">校园全景漫游</div>
+                <div class="s">XMUT · Web VR Campus Tour</div>
+            </div>
+        </div>
+        <div id="scene-info" class="panel">
+            <div class="name" id="scene-name">校门入口</div>
+            <div class="desc" id="scene-desc">欢迎来到厦门理工学院</div>
+        </div>
+    </div>
+
+    <!-- 多功能按钮组：hover 滑动展开 -->
+    <div class="fab-group" id="fab-group">
+        <div class="fab fab-sub fab-main" id="fab-menu" title="主菜单">
+            <span>☰</span>
+            <div class="tooltip">关闭菜单</div>
+        </div>
+        <div class="fab fab-sub" id="fab-back" title="上一个场景">
+            <span>←</span>
+            <div class="tooltip">上一场景</div>
+        </div>
+        <div class="fab fab-sub" id="fab-forward" title="下一个场景">
+            <span>→</span>
+            <div class="tooltip">下一场景</div>
+        </div>
+        <div class="fab fab-sub" id="fab-rotate" title="自动旋转">
+            <span>⟳</span>
+            <div class="tooltip">自动旋转</div>
+        </div>
+        <div class="fab fab-sub" id="fab-reset" title="重置视角">
+            <span>⌂</span>
+            <div class="tooltip">重置视角</div>
+        </div>
+        <div class="fab fab-sub" id="fab-home" title="返回首页">
+            <span>◉</span>
+            <div class="tooltip">回到校门</div>
+        </div>
+        <div class="fab fab-sub" id="fab-info" title="关于项目">
+            <span>ℹ</span>
+            <div class="tooltip">关于项目</div>
+        </div>
+    </div>
+
+    <div id="scenes-bar" class="panel"></div>
+
+    <div id="tip">拖动鼠标环视 · 点击带光晕的圆点切换场景 · 鼠标悬停右侧主按钮展开功能</div>
+
+    <div id="hotspot-label"></div>
+
+    <a-scene
+        vr-mode-ui="enabled: false"
+        loading-screen="dotsColor: #00d4ff; backgroundColor: #050810"
+        device-orientation-permission-ui="enabled: false"
+    >
+        <a-assets timeout="30000">
+            <img id="img-1" src="assets/博学苑1.jpg" crossorigin="anonymous">
+            <img id="img-2" src="assets/医务室2.jpg" crossorigin="anonymous">
+            <img id="img-3" src="assets/逸夫楼3.jpg" crossorigin="anonymous">
+            <img id="img-4" src="assets/校门4.jpg" crossorigin="anonymous">
+            <img id="img-5" src="assets/花园5.jpg" crossorigin="anonymous">
+            <img id="img-6" src="assets/明理楼6.jpg" crossorigin="anonymous">
+        </a-assets>
+
+        <a-sky id="sky" src="#img-4" rotation="0 -90 0"></a-sky>
+
+        <a-entity id="camera-rig" position="0 1.6 0">
+            <a-camera
+                look-controls="pointerLockEnabled: false; reverseMouseDrag: false"
+                wasd-controls="enabled: false"
+                fov="100"
+                cursor="rayOrigin: mouse; fuse: false"
+                raycaster="objects: .clickable"
+            ></a-camera>
+        </a-entity>
+
+        <a-entity id="hotspots-container"></a-entity>
+
+        <a-entity light="type: ambient; color: #FFF; intensity: 1"></a-entity>
+    </a-scene>
+
+    <script>
+        const scenes = [
+            { id: 1, name: '博学苑',   desc: '知识的殿堂',       image: 'assets/博学苑1.jpg',
+              hotspots: [{ target: 2, position: '2.2 0 -2.5', label: '→ 医务室' }, { target: 3, position: '-2.2 0 -2.5', label: '→ 逸夫楼' }] },
+            { id: 2, name: '医务室',   desc: '健康保障',         image: 'assets/医务室2.jpg',
+              hotspots: [{ target: 1, position: '1.5 0 -3', label: '→ 博学苑' }, { target: 4, position: '-1.5 0 -3', label: '→ 校门' }] },
+            { id: 3, name: '逸夫楼',   desc: '教学主楼',         image: 'assets/逸夫楼3.jpg',
+              hotspots: [{ target: 1, position: '2 0 -2.5', label: '→ 博学苑' }, { target: 6, position: '-2 0 -2.5', label: '→ 明理楼' }] },
+            { id: 4, name: '校门入口', desc: '校园的门户',       image: 'assets/校门4.jpg',
+              hotspots: [{ target: 2, position: '1.5 0 -3', label: '→ 医务室' }, { target: 5, position: '-1.5 0 -3', label: '→ 花园' }, { target: 1, position: '0 0 -4', label: '→ 博学苑' }] },
+            { id: 5, name: '花园',     desc: '休闲的好去处',     image: 'assets/花园5.jpg',
+              hotspots: [{ target: 4, position: '2 0 -2.5', label: '→ 校门' }, { target: 6, position: '-2 0 -2.5', label: '→ 明理楼' }] },
+            { id: 6, name: '明理楼',   desc: '行政与办公',       image: 'assets/明理楼6.jpg',
+              hotspots: [{ target: 3, position: '2 0 -2.5', label: '→ 逸夫楼' }, { target: 5, position: '-2 0 -2.5', label: '→ 花园' }, { target: 4, position: '0 0 -4', label: '→ 校门' }] }
+        ];
+
+        let currentScene = 4;
+        let history = [4];
+        let historyIndex = 0;
+        let autoRotate = false;
+        let autoRotateId = null;
+        let mouseX = 0, mouseY = 0;
+        let isTransitioning = false;
+
+        const $ = (id) => document.getElementById(id);
+        const hotspotLabel = $('hotspot-label');
+        const sky = $('sky');
+        const hotspotsContainer = $('hotspots-container');
+        const scenesBar = $('scenes-bar');
+        const loader = $('loader');
+        const progress = $('progress');
+        const tip = $('tip');
+        const slideMask = $('slide-mask');
+        const maskNum = $('mask-num');
+        const fabGroup = $('fab-group');
+        const fabMenu = $('fab-menu');
+
+        function init() {
+            buildSceneCards();
+            bindFab();
+
+            document.addEventListener('mousemove', (e) => {
+                mouseX = e.clientX; mouseY = e.clientY;
+            });
+
+            const sceneEl = document.querySelector('a-scene');
+            const start = () => {
+                loadScene(currentScene, false);
+                setTimeout(() => loader.classList.add('hide'), 600);
+            };
+            if (sceneEl.hasLoaded) start();
+            else sceneEl.addEventListener('loaded', start);
+
+            setTimeout(() => tip.classList.add('hide'), 5000);
+        }
+
+        function buildSceneCards() {
+            scenesBar.innerHTML = '';
+            scenes.forEach((s) => {
+                const card = document.createElement('div');
+                card.className = 'scene-card' + (s.id === currentScene ? ' active' : '');
+                card.dataset.id = s.id;
+                card.innerHTML = `
+                    <span class="num">0${s.id}</span>
+                    <img class="thumb" src="${s.image}" alt="${s.name}">
+                    <div class="label">${s.name}</div>
+                `;
+                card.onclick = () => {
+                    if (s.id !== currentScene) loadScene(s.id, true);
+                };
+                scenesBar.appendChild(card);
+            });
+        }
+
+        function updateSceneCards() {
+            document.querySelectorAll('.scene-card').forEach(c => {
+                c.classList.toggle('active', Number(c.dataset.id) === currentScene);
+            });
+            const active = document.querySelector('.scene-card.active');
+            if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+
+        function playSlideTransition(targetId, callback) {
+            if (isTransitioning) return;
+            isTransitioning = true;
+            maskNum.textContent = '0' + targetId;
+            slideMask.classList.add('slide-in');
+            setTimeout(() => {
+                callback();
+                setTimeout(() => {
+                    slideMask.classList.remove('slide-in');
+                    setTimeout(() => { isTransitioning = false; }, 400);
+                }, 200);
+            }, 700);
+        }
+
+        function loadScene(sceneId, pushHistory = true) {
+            const scene = scenes.find(s => s.id === sceneId);
+            if (!scene) return;
+            const doLoad = () => {
+                currentScene = sceneId;
+                $('scene-name').textContent = scene.name;
+                $('scene-desc').textContent = scene.desc;
+                sky.setAttribute('src', '#img-' + sceneId);
+                hotspotsContainer.innerHTML = '';
+                scene.hotspots.forEach(createHotspot);
+                updateSceneCards();
+            };
+            if (pushHistory) {
+                playSlideTransition(sceneId, () => {
+                    doLoad();
+                    if (history[history.length - 1] !== sceneId) {
+                        history = history.slice(0, historyIndex + 1);
+                        history.push(sceneId);
+                        historyIndex = history.length - 1;
+                    }
+                });
+            } else {
+                doLoad();
+            }
+        }
+
+        function createHotspot(hotspot) {
+            const el = document.createElement('a-image');
+            const svg = encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+                    <defs>
+                        <radialGradient id="g" cx="50%" cy="50%" r="50%">
+                            <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.9"/>
+                            <stop offset="60%" stop-color="#00d4ff" stop-opacity="0.4"/>
+                            <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
+                        </radialGradient>
+                    </defs>
+                    <circle cx="60" cy="60" r="55" fill="url(#g)"/>
+                    <circle cx="60" cy="60" r="30" fill="none" stroke="#00d4ff" stroke-width="2" opacity="0.8"/>
+                    <circle cx="60" cy="60" r="14" fill="#00d4ff"/>
+                    <circle cx="60" cy="60" r="6" fill="#fff"/>
+                </svg>
+            `);
+            el.setAttribute('src', 'data:image/svg+xml,' + svg);
+            el.setAttribute('position', hotspot.position);
+            el.setAttribute('width', '1.2');
+            el.setAttribute('height', '1.2');
+            el.setAttribute('class', 'hotspot clickable');
+            el.setAttribute('data-target', hotspot.target);
+            el.setAttribute('data-label', hotspot.label);
+
+            el.addEventListener('raycaster-intersected', () => {
+                hotspotLabel.textContent = hotspot.label;
+                hotspotLabel.style.display = 'block';
+                hotspotLabel.style.left = mouseX + 'px';
+                hotspotLabel.style.top = mouseY + 'px';
+            });
+            el.addEventListener('raycaster-intersected-cleared', () => {
+                hotspotLabel.style.display = 'none';
+            });
+            el.addEventListener('click', () => loadScene(hotspot.target, true));
+
+            hotspotsContainer.appendChild(el);
+        }
+
+        // ===== 多功能按钮事件 =====
+        function bindFab() {
+            fabMenu.addEventListener('click', (e) => {
+                e.stopPropagation();
+                fabGroup.classList.toggle('pinned');
+            });
+            document.addEventListener('click', (e) => {
+                if (!fabGroup.contains(e.target)) fabGroup.classList.remove('pinned');
+            });
+
+            $('fab-back').addEventListener('click', () => {
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    const prev = history[historyIndex];
+                    if (prev !== currentScene) {
+                        const doBack = () => {
+                            const scene = scenes.find(s => s.id === prev);
+                            currentScene = prev;
+                            $('scene-name').textContent = scene.name;
+                            $('scene-desc').textContent = scene.desc;
+                            sky.setAttribute('src', '#img-' + prev);
+                            hotspotsContainer.innerHTML = '';
+                            scene.hotspots.forEach(createHotspot);
+                            updateSceneCards();
+                        };
+                        playSlideTransition(prev, doBack);
+                    }
+                }
+            });
+
+            $('fab-forward').addEventListener('click', () => {
+                const cur = currentScene;
+                const next = (cur % scenes.length) + 1;
+                loadScene(next, true);
+            });
+
+            $('fab-rotate').addEventListener('click', toggleAutorotate);
+            $('fab-reset').addEventListener('click', resetView);
+            $('fab-home').addEventListener('click', () => { if (currentScene !== 4) loadScene(4, true); });
+            $('fab-info').addEventListener('click', () => {
+                alert('厦门理工学院·校园全景漫游\n\n基于 A-Frame 1.4.2 + Three.js\n6 个校园场景 · 360° 全景浏览\n作者：郭扬 · 2312001105\n\nGitHub Pages 部署');
+            });
+        }
+
+        function toggleAutorotate() {
+            autoRotate = !autoRotate;
+            const cameraRig = $('camera-rig');
+            const camera = document.querySelector('a-camera');
+            if (autoRotate) {
+                const currentRotation = camera.getAttribute('rotation');
+                let currentY = currentRotation ? currentRotation.y : 0;
+                function step() {
+                    if (!autoRotate) return;
+                    currentY = (currentY + 0.3) % 360;
+                    cameraRig.setAttribute('rotation', { x: 0, y: currentY, z: 0 });
+                    autoRotateId = requestAnimationFrame(step);
+                }
+                step();
+            } else {
+                if (autoRotateId) cancelAnimationFrame(autoRotateId);
+                autoRotateId = null;
+            }
+        }
+
+        function resetView() {
+            const camera = document.querySelector('a-camera');
+            const rig = $('camera-rig');
+            camera.setAttribute('rotation', '0 0 0');
+            rig.setAttribute('rotation', '0 0 0');
+        }
+
+        // 资源加载进度
+        const sceneEl = document.querySelector('a-scene');
+        const totalAssets = scenes.length;
+        let loadedAssets = 0;
+        document.querySelectorAll('a-assets img').forEach(img => {
+            if (img.complete) { loadedAssets++; progress.textContent = `已加载 ${loadedAssets}/${totalAssets}`; }
+            else img.addEventListener('load', () => { loadedAssets++; progress.textContent = `已加载 ${loadedAssets}/${totalAssets}`; });
+        });
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
